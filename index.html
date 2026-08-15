@@ -479,11 +479,11 @@ footer{background:var(--footer-bg);padding:64px 0 26px;}
     <button class="close-x" onclick="closeModal('signModal')">&times;</button>
     <h3>Admin Sign In</h3>
     <p class="sub">Sign in to edit this site.</p>
-    <label>Username</label>
-    <input id="loginUser" type="text" autocomplete="off">
+    <label>Admin Email</label>
+    <input id="loginUser" type="email" autocomplete="off">
     <label>Password</label>
     <input id="loginPass" type="password" autocomplete="off">
-    <p class="error-msg" id="loginError">Incorrect username or password.</p>
+    <p class="error-msg" id="loginError">Incorrect email or password.</p>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal('signModal')">Cancel</button>
       <button class="btn-primary" onclick="attemptLogin()">Sign In</button>
@@ -520,7 +520,7 @@ footer{background:var(--footer-bg);padding:64px 0 26px;}
       <label>Choose a file from your device</label>
       <input id="mediaFileInput" type="file" accept="image/*,video/*">
     </div>
-    <p class="hint">A pasted URL always loads fastest. Uploaded files are embedded with the page, so keep them modest in size.</p>
+    <p class="hint">Uploaded files are stored in your Supabase project and visible to everyone. A pasted URL works too if you already have one hosted elsewhere.</p>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal('mediaModal')">Cancel</button>
       <button class="btn-primary" onclick="saveMediaModal()">Save</button>
@@ -553,16 +553,23 @@ footer{background:var(--footer-bg);padding:64px 0 26px;}
 
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* =========================================================
-   THE MILLIAN — self-editing site (v3)
-   Persistence: localStorage (works when the file is hosted
-   anywhere / opened directly — no external backend required).
+   THE MILLIAN — self-editing site (v4)
+   Persistence: Supabase (Postgres + Auth + Storage).
+   Content is shared across every visitor and every device.
    ========================================================= */
 
-const ADMIN_USER = "themilianbodega2";
-const ADMIN_PASS = "2026milianhunting";
-const STORAGE_KEY = "millian-site-v3";
+// ---- FILL THESE IN with your own values from Supabase ----
+// Project Settings → API → Project URL / anon public key
+const SUPABASE_URL = "https://xrxtvsrmueerbinxdbqg.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhyeHR2c3JtdWVlcmJpbnhkYnFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3NDY0MDEsImV4cCI6MjEwMjMyMjQwMX0.SvTocwowM6-pHCkTRgWd9Niymo0trRUeFwlc1DFPwhw";
+// ------------------------------------------------------------
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const CONTENT_ROW_ID = "millian";
+const ASSET_BUCKET = "site-assets";
 
 const PH_PORTRAIT = "https://placehold.co/900x1200/efece7/6a0d1a?text=%2B";
 const PH_SQUARE    = "https://placehold.co/900x900/efece7/6a0d1a?text=%2B";
@@ -734,27 +741,34 @@ let pendingPdfName = "";
 let listingState = {};
 let revealObserver = null;
 
-/* ---------------- storage (localStorage — works on any host, no backend needed) ---------------- */
-function loadSite(){
+/* ---------------- storage (Supabase Postgres — shared across every visitor) ---------------- */
+async function loadSite(){
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    site = raw ? JSON.parse(raw) : defaultData();
+    const { data, error } = await sb.from('site_content').select('data').eq('id', CONTENT_ROW_ID).single();
+    if(error) throw error;
+    site = (data && data.data && Object.keys(data.data).length) ? data.data : defaultData();
   }catch(e){
+    console.error(e);
     site = defaultData();
+    showToast("Could not reach the database — showing default content.");
   }
 }
-function saveSite(){
+async function saveSite(){
   try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(site));
+    const { error } = await sb.from('site_content')
+      .update({ data: site, updated_at: new Date().toISOString() })
+      .eq('id', CONTENT_ROW_ID);
+    if(error) throw error;
     return true;
   }catch(e){
-    showToast("Could not save — your browser storage may be full or blocked.");
     console.error(e);
+    showToast("Could not save — make sure you're still signed in.");
     return false;
   }
 }
-function manualSave(){
-  if(saveSite()) showToast("All changes saved.");
+async function manualSave(){
+  const ok = await saveSite();
+  if(ok) showToast("All changes saved.");
 }
 
 /* ---------------- utils ---------------- */
@@ -772,13 +786,32 @@ function money(n){ return "GH₵ " + Number(n).toLocaleString(); }
 function stop(ev){ if(ev) ev.stopPropagation(); }
 
 /* ---------------- auth ---------------- */
-function onSignButton(){
+function enterAdminMode(){
+  isAdmin = true;
+  document.body.classList.add('admin-on');
+  document.getElementById('adminPill').style.display='inline-block';
+  document.getElementById('saveBtn').style.display='inline-block';
+  document.getElementById('signBtn').textContent='Sign Out';
+}
+function exitAdminMode(){
+  isAdmin = false;
+  document.body.classList.remove('admin-on');
+  document.getElementById('adminPill').style.display='none';
+  document.getElementById('saveBtn').style.display='none';
+  document.getElementById('signBtn').textContent='Sign In';
+}
+async function checkAuthSession(){
+  try{
+    const { data } = await sb.auth.getSession();
+    if(data && data.session){
+      enterAdminMode();
+    }
+  }catch(e){ console.error(e); }
+}
+async function onSignButton(){
   if(isAdmin){
-    isAdmin = false;
-    document.body.classList.remove('admin-on');
-    document.getElementById('adminPill').style.display='none';
-    document.getElementById('saveBtn').style.display='none';
-    document.getElementById('signBtn').textContent='Sign In';
+    await sb.auth.signOut();
+    exitAdminMode();
     showToast("Signed out of admin mode.");
     renderPage();
   }else{
@@ -788,19 +821,17 @@ function onSignButton(){
     openModal('signModal');
   }
 }
-function attemptLogin(){
-  const u = document.getElementById('loginUser').value.trim();
-  const p = document.getElementById('loginPass').value;
-  if(u===ADMIN_USER && p===ADMIN_PASS){
-    isAdmin = true;
-    document.body.classList.add('admin-on');
-    document.getElementById('adminPill').style.display='inline-block';
-    document.getElementById('saveBtn').style.display='inline-block';
-    document.getElementById('signBtn').textContent='Sign Out';
+async function attemptLogin(){
+  const email = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(!error){
+    enterAdminMode();
     closeModal('signModal');
     showToast("Welcome back — admin mode is on.");
     renderPage();
   }else{
+    document.getElementById('loginError').textContent = error.message || "Incorrect email or password.";
     document.getElementById('loginError').style.display='block';
   }
 }
@@ -863,18 +894,40 @@ function savePdfModal(){
   saveSite(); renderPage(); closeModal('pdfModal');
 }
 
+async function uploadToStorage(file, prefix){
+  const ext = (file.name.split('.').pop() || 'dat').toLowerCase();
+  const path = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+  const { error } = await sb.storage.from(ASSET_BUCKET).upload(path, file, { upsert:false });
+  if(error) throw error;
+  const { data } = sb.storage.from(ASSET_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
 document.addEventListener('DOMContentLoaded', ()=>{
-  document.getElementById('mediaFileInput').addEventListener('change', (e)=>{
+  document.getElementById('mediaFileInput').addEventListener('change', async (e)=>{
     const file = e.target.files[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{ pendingUploadDataUrl = reader.result; };
-    reader.readAsDataURL(file);
+    pendingUploadDataUrl = null;
+    showToast("Uploading photo…");
+    try{
+      pendingUploadDataUrl = await uploadToStorage(file, 'images');
+      showToast("Uploaded — click Save to apply.");
+    }catch(err){
+      console.error(err);
+      showToast("Upload failed — check your Supabase Storage setup.");
+    }
   });
-  document.getElementById('pdfFileInput').addEventListener('change', (e)=>{
+  document.getElementById('pdfFileInput').addEventListener('change', async (e)=>{
     const file = e.target.files[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{ pendingPdfDataUrl = reader.result; pendingPdfName = file.name; };
-    reader.readAsDataURL(file);
+    pendingPdfDataUrl = null; pendingPdfName = "";
+    showToast("Uploading PDF…");
+    try{
+      pendingPdfDataUrl = await uploadToStorage(file, 'pdfs');
+      pendingPdfName = file.name;
+      showToast("Uploaded — click Save to apply.");
+    }catch(err){
+      console.error(err);
+      showToast("Upload failed — check your Supabase Storage setup.");
+    }
   });
 });
 
@@ -1896,9 +1949,10 @@ function bindMediaButtons(){
 }
 
 /* ---------------- boot ---------------- */
-function boot(){
+async function boot(){
   document.getElementById('yr').textContent = new Date().getFullYear();
-  loadSite();
+  await checkAuthSession();
+  await loadSite();
   renderNav();
   renderPage();
   window.addEventListener('resize', ()=>{
