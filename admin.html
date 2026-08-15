@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — The Millian</title>
+<!-- Keep this page out of search results and off any sitemap -->
+<meta name="robots" content="noindex, nofollow, noarchive">
+<style>
+  :root{ --white:#ffffff; --red:#6a0d1a; --red-dark:#4d0912; --ink:#1a1a1a; --grey:#6b6b6b; --divider:#e2e0dc; }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--red); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+  }
+  .card{
+    background:#fff; width:100%; max-width:380px; margin:20px; padding:40px 34px;
+    border-radius:2px; box-shadow:0 20px 60px rgba(0,0,0,.35);
+  }
+  h1{
+    margin:0 0 6px; font-size:20px; letter-spacing:.04em; color:var(--ink); text-align:center;
+  }
+  p.sub{ margin:0 0 28px; font-size:12.5px; color:var(--grey); text-align:center; }
+  label{ display:block; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--grey); margin-bottom:6px; margin-top:16px; }
+  input{ width:100%; padding:12px 13px; border:1px solid var(--divider); font-size:14px; border-radius:1px; font-family:inherit; }
+  input:focus{ outline:none; border-color:var(--red); }
+  button{
+    width:100%; margin-top:26px; padding:13px; background:var(--red); color:#fff; border:none;
+    font-size:11px; letter-spacing:.12em; text-transform:uppercase; border-radius:1px; cursor:pointer; font-family:inherit;
+  }
+  button:hover{ background:var(--red-dark); }
+  button:disabled{ opacity:.6; cursor:default; }
+  .error-msg{ color:#a3222f; font-size:12px; margin-top:14px; text-align:center; display:none; }
+  .status{ font-size:12px; color:var(--grey); text-align:center; margin-top:14px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>The Millian — Admin</h1>
+  <p class="sub">Sign in to manage the site.</p>
+
+  <label>Email</label>
+  <input id="email" type="email" autocomplete="username">
+  <label>Password</label>
+  <input id="password" type="password" autocomplete="current-password">
+
+  <button id="loginBtn" onclick="doLogin()">Sign In</button>
+  <p class="error-msg" id="errorMsg"></p>
+  <p class="status" id="statusMsg"></p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // Same project as the main site — keep these two values in sync with millian-website.html
+  const SUPABASE_URL = "https://xrxtvsrmueerbinxdbqg.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhyeHR2c3JtdWVlcmJpbnhkYnFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3NDY0MDEsImV4cCI6MjEwMjMyMjQwMX0.SvTocwowM6-pHCkTRgWd9Niymo0trRUeFwlc1DFPwhw";
+
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // If already signed in, skip straight to the site with admin mode active
+  (async () => {
+    const { data } = await sb.auth.getSession();
+    if(data && data.session){
+      document.getElementById('statusMsg').textContent = "Already signed in — redirecting…";
+      window.location.href = "/";
+    }
+  })();
+
+  async function doLogin(){
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const errorEl = document.getElementById('errorMsg');
+    const btn = document.getElementById('loginBtn');
+    errorEl.style.display = 'none';
+
+    if(!email || !password){
+      errorEl.textContent = "Enter both an email and a password.";
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Signing In…";
+
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+
+    if(error){
+      errorEl.textContent = error.message || "Incorrect email or password.";
+      errorEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = "Sign In";
+      return;
+    }
+
+    // Session is now stored by supabase-js; the main site reads it automatically on load.
+    window.location.href = "/";
+  }
+
+  document.getElementById('password').addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter') doLogin();
+  });
+</script>
+</body>
+</html>

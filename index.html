@@ -422,7 +422,7 @@ footer{background:var(--footer-bg);padding:64px 0 26px;}
     <div class="header-utility">
       <span id="adminPill" class="admin-pill" style="display:none;">Admin Mode</span>
       <button id="saveBtn" class="save-btn" style="display:none;" onclick="manualSave()">Save Changes</button>
-      <button id="signBtn" onclick="onSignButton()">Sign In</button>
+      <button id="signOutBtn" style="display:none;" onclick="onSignButton()">Sign Out</button>
       <button class="hamburger-btn" aria-label="Open menu" onclick="openMobileMenu()"><span></span><span></span><span></span></button>
     </div>
     <div class="logo-row">
@@ -474,22 +474,6 @@ footer{background:var(--footer-bg);padding:64px 0 26px;}
   </div>
 </footer>
 
-<div class="modal-backdrop" id="signModal">
-  <div class="modal">
-    <button class="close-x" onclick="closeModal('signModal')">&times;</button>
-    <h3>Admin Sign In</h3>
-    <p class="sub">Sign in to edit this site.</p>
-    <label>Admin Email</label>
-    <input id="loginUser" type="email" autocomplete="off">
-    <label>Password</label>
-    <input id="loginPass" type="password" autocomplete="off">
-    <p class="error-msg" id="loginError">Incorrect email or password.</p>
-    <div class="modal-actions">
-      <button class="btn-ghost" onclick="closeModal('signModal')">Cancel</button>
-      <button class="btn-primary" onclick="attemptLogin()">Sign In</button>
-    </div>
-  </div>
-</div>
 
 <div class="modal-backdrop" id="textModal">
   <div class="modal">
@@ -791,14 +775,14 @@ function enterAdminMode(){
   document.body.classList.add('admin-on');
   document.getElementById('adminPill').style.display='inline-block';
   document.getElementById('saveBtn').style.display='inline-block';
-  document.getElementById('signBtn').textContent='Sign Out';
+  document.getElementById('signOutBtn').style.display='inline-block';
 }
 function exitAdminMode(){
   isAdmin = false;
   document.body.classList.remove('admin-on');
   document.getElementById('adminPill').style.display='none';
   document.getElementById('saveBtn').style.display='none';
-  document.getElementById('signBtn').textContent='Sign In';
+  document.getElementById('signOutBtn').style.display='none';
 }
 async function checkAuthSession(){
   try{
@@ -808,32 +792,13 @@ async function checkAuthSession(){
     }
   }catch(e){ console.error(e); }
 }
+// There is no sign-in entry point on the public site — admin login only
+// happens at /admin.html. This button only ever needs to sign out.
 async function onSignButton(){
-  if(isAdmin){
-    await sb.auth.signOut();
-    exitAdminMode();
-    showToast("Signed out of admin mode.");
-    renderPage();
-  }else{
-    document.getElementById('loginUser').value='';
-    document.getElementById('loginPass').value='';
-    document.getElementById('loginError').style.display='none';
-    openModal('signModal');
-  }
-}
-async function attemptLogin(){
-  const email = document.getElementById('loginUser').value.trim();
-  const password = document.getElementById('loginPass').value;
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  if(!error){
-    enterAdminMode();
-    closeModal('signModal');
-    showToast("Welcome back — admin mode is on.");
-    renderPage();
-  }else{
-    document.getElementById('loginError').textContent = error.message || "Incorrect email or password.";
-    document.getElementById('loginError').style.display='block';
-  }
+  await sb.auth.signOut();
+  exitAdminMode();
+  showToast("Signed out of admin mode.");
+  renderPage();
 }
 
 /* ---------------- media modal ---------------- */
