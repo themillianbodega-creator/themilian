@@ -726,27 +726,87 @@ let listingState = {};
 let revealObserver = null;
 
 /* ---------------- storage (Supabase Postgres — shared across every visitor) ---------------- */
+// Turns any thrown value (Supabase's PostgrestError, a network TypeError,
+// a plain object, whatever) into an actual readable string — so error logs
+// and toasts never collapse into a useless "[object Object]".
+function describeError(e){
+  if(!e) return 'unknown error';
+  if(typeof e === 'string') return e;
+  const parts = [];
+  if(e.message) parts.push(e.message);
+  if(e.code) parts.push('code: ' + e.code);
+  if(e.details) parts.push('details: ' + e.details);
+  if(e.hint) parts.push('hint: ' + e.hint);
+  if(e.status) parts.push('status: ' + e.status);
+  if(parts.length) return parts.join(' | ');
+  try{ return JSON.stringify(e); }catch(_){ return String(e); }
+}
+
 async function loadSite(){
-  try{
+  const attempt = async ()=>{
     const { data, error } = await sb.from('site_content').select('data').eq('id', CONTENT_ROW_ID).single();
     if(error) throw error;
+    return data;
+  };
+  try{
+    let data;
+    try{
+      data = await attempt();
+    }catch(firstErr){
+      // Mobile networks in particular can drop the first request — retry once before giving up.
+      console.warn('loadSite: first attempt failed, retrying… ' + describeError(firstErr));
+      await new Promise(r=>setTimeout(r, 800));
+      data = await attempt();
+    }
     site = (data && data.data && Object.keys(data.data).length) ? data.data : defaultData();
   }catch(e){
-    console.error(e);
+    console.error('loadSite failed: ' + describeError(e));
     site = defaultData();
     showToast("Could not reach the database — showing default content.");
   }
 }
-async function saveSite(){
+
+// Returns a session with a valid (non-expired) access token, refreshing it
+// first if it's expired or about to expire. Returns null if the user isn't
+// really signed in (or the session can't be refreshed), so callers can tell
+// "looks signed in" apart from "is actually able to write."
+async function getValidSession(){
   try{
-    const { error } = await sb.from('site_content')
+    const { data, error } = await sb.auth.getSession();
+    if(error || !data.session) return null;
+    const expiresAt = data.session.expires_at; // unix seconds
+    const now = Math.floor(Date.now() / 1000);
+    if(!expiresAt || expiresAt - now < 60){
+      const { data: refreshed, error: refreshErr } = await sb.auth.refreshSession();
+      if(refreshErr || !refreshed.session){
+        console.error('Session refresh failed: ' + describeError(refreshErr));
+        return null;
+      }
+      return refreshed.session;
+    }
+    return data.session;
+  }catch(e){
+    console.error('getValidSession failed: ' + describeError(e));
+    return null;
+  }
+}
+
+async function saveSite(){
+  const session = await getValidSession();
+  if(!session){
+    exitAdminMode();
+    showToast("Your session expired — sign in again at /admin.html");
+    return false;
+  }
+  try{
+    const { error, status } = await sb.from('site_content')
       .update({ data: site, updated_at: new Date().toISOString() })
       .eq('id', CONTENT_ROW_ID);
     if(error) throw error;
     return true;
   }catch(e){
-    console.error(e);
-    showToast("Could not save — make sure you're still signed in.");
+    console.error('saveSite failed: ' + describeError(e));
+    showToast("Could not save: " + describeError(e));
     return false;
   }
 }
@@ -785,12 +845,10 @@ function exitAdminMode(){
   document.getElementById('signOutBtn').style.display='none';
 }
 async function checkAuthSession(){
-  try{
-    const { data } = await sb.auth.getSession();
-    if(data && data.session){
-      enterAdminMode();
-    }
-  }catch(e){ console.error(e); }
+  // Only enter admin mode if the session is actually valid right now —
+  // not just "an old session object happens to exist in storage."
+  const session = await getValidSession();
+  if(session) enterAdminMode();
 }
 // There is no sign-in entry point on the public site — admin login only
 // happens at /admin.html. This button only ever needs to sign out.
@@ -860,6 +918,11 @@ function savePdfModal(){
 }
 
 async function uploadToStorage(file, prefix){
+  const session = await getValidSession();
+  if(!session){
+    exitAdminMode();
+    throw new Error("Your session expired — sign in again at /admin.html");
+  }
   const ext = (file.name.split('.').pop() || 'dat').toLowerCase();
   const path = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
   const { error } = await sb.storage.from(ASSET_BUCKET).upload(path, file, { upsert:false });
@@ -877,8 +940,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
       pendingUploadDataUrl = await uploadToStorage(file, 'images');
       showToast("Uploaded — click Save to apply.");
     }catch(err){
-      console.error(err);
-      showToast("Upload failed — check your Supabase Storage setup.");
+      console.error('Photo upload failed: ' + describeError(err));
+      showToast(err.message || "Upload failed — check your Supabase Storage setup.");
     }
   });
   document.getElementById('pdfFileInput').addEventListener('change', async (e)=>{
@@ -890,8 +953,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
       pendingPdfName = file.name;
       showToast("Uploaded — click Save to apply.");
     }catch(err){
-      console.error(err);
-      showToast("Upload failed — check your Supabase Storage setup.");
+      console.error('PDF upload failed: ' + describeError(err));
+      showToast(err.message || "Upload failed — check your Supabase Storage setup.");
     }
   });
 });
